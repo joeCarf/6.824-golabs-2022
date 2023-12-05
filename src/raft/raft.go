@@ -839,8 +839,9 @@ func (rf *Raft) broadcastEntries(peer int) {
 		return
 	}
 	//NOTE: 加了一个过期rpc的处理, 比如发现args.term已经小于currentTerm了, 说明这是个过期的, 直接忽略就好, 因为RPC处理过程肯定能长, 因为节点是会crash的
+	// 除了过期rpc, 如果节点状态发生了变化, 比如此时的状态变了, 或者已经安装了快照, 忽略此rpc
 	rf.mu.RLock()
-	if args.Term < rf.currentTerm || rf.state != LEADER {
+	if args.Term < rf.currentTerm || rf.state != LEADER || rf.nextIndex[peer] <= rf.log.lastIncludeEntry().Index {
 		DPrintf(dAppend, "T%d: S%d <- S%d received expired rpc reply. [args.Term=%d, currentTerm=%d]", rf.currentTerm, rf.me, peer, args.Term, rf.currentTerm)
 		rf.mu.RUnlock()
 		return
@@ -932,7 +933,7 @@ func (rf *Raft) broadcastSnapshot(peer int) {
 	}
 	//NOTE: 加了一个过期rpc的处理, 比如发现args.term已经小于currentTerm了, 说明这是个过期的, 直接忽略就好, 因为RPC处理过程肯定能长, 因为节点是会crash的
 	rf.mu.RLock()
-	if args.Term < rf.currentTerm || rf.state != LEADER {
+	if args.Term < rf.currentTerm || rf.state != LEADER || rf.nextIndex[peer] > rf.log.lastIncludeEntry().Index {
 		DPrintf(dSnapshot, "T%d: S%d <- S%d received expired rpc reply. [args.Term=%d, currentTerm=%d]",
 			rf.currentTerm, rf.me, peer, args.Term, rf.currentTerm)
 		rf.mu.RUnlock()
