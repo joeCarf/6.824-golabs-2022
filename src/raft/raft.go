@@ -43,6 +43,7 @@ type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
 	CommandIndex int
+	CommandTerm  int
 
 	// For 2D:
 	SnapshotValid bool
@@ -880,7 +881,8 @@ func (rf *Raft) broadcastEntries(peer int) {
 				conflictIndex := rf.nextIndex[peer]
 				conflictTerm := reply.XTerm
 				for i := rf.nextIndex[peer] - 1; i >= reply.XIndex; i-- {
-					if rf.log.at(i).Term == conflictTerm {
+					//安装快照后, 必须防止越界访问
+					if i-rf.log.lastIncludeEntry().Index >= 0 && rf.log.at(i).Term == conflictTerm {
 						// case2: leader has XTerm: nextIndex = leader's last entry for XTerm
 						break
 					}
@@ -1023,6 +1025,7 @@ func (rf *Raft) applier() {
 				CommandValid: true,
 				Command:      e.MetaData,
 				CommandIndex: e.Index,
+				CommandTerm:  e.Term,
 			}
 		}
 		rf.mu.Lock()
@@ -1043,7 +1046,7 @@ func (rf *Raft) applier() {
 //  @return time.Duration
 //
 func (rf *Raft) randomElectionTime() time.Duration {
-	ms := 600 + (rand.Int63() % 300)
+	ms := 150 + (rand.Int63() % 150)
 	return time.Duration(ms) * time.Millisecond
 }
 
@@ -1054,7 +1057,7 @@ func (rf *Raft) randomElectionTime() time.Duration {
 //  @return time.Duration
 //
 func (rf *Raft) stableHeartbeatTime() time.Duration {
-	ms := 150
+	ms := 50
 	return time.Duration(ms) * time.Millisecond
 }
 

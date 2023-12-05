@@ -5,6 +5,7 @@ const (
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongLeader = "ErrWrongLeader"
 	ErrTimeout     = "ErrTimeout"
+	ErrOutofDate   = "ErrOutofDate"
 )
 
 type Err string
@@ -55,8 +56,8 @@ type CmdArgs struct {
 	Seq      int64   //标识cmd的seq
 }
 type CmdReply struct {
-	Err   Err    //错误类型
-	Value string //返回值
+	Status Err    //错误类型
+	Value  string //返回值
 }
 
 // ==================Message: applier和client间传递的消息类型==============//

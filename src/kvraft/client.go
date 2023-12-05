@@ -3,8 +3,8 @@ package kvraft
 import (
 	"6.824/labrpc"
 	"crypto/rand"
+	"math/big"
 )
-import "math/big"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
@@ -118,17 +118,18 @@ func (ck *Clerk) sendCommand(key string, value string, op string) CmdReply {
 		DPrintf(dCommand, "C%d -> R%d send Command rpc, args = %v", ck.clientId, leaderId, args)
 		ok := ck.servers[leaderId].Call("KVServer.HandlerCommand", &args, &reply)
 		// 如果失败, 或是超时和错误的leader, 都换一个再次尝试, 这里用的是轮询的方式
-		if !ok || reply.Err == ErrWrongLeader {
-			DPrintf(dCommand, "C%v <- R%d receive failed rpc for wrong leader, retry R%d", ck.clientId, leaderId, (leaderId+1)%int64(len(ck.servers)))
+		if !ok || reply.Status == ErrWrongLeader || reply.Status == ErrTimeout {
+			DPrintf(dCommand, "C%v <- R%d receive failed rpc for [ok=%v, reply=%v], retry R%d",
+				ck.clientId, leaderId, ok, reply, (leaderId+1)%int64(len(ck.servers)))
 			leaderId = (leaderId + 1) % int64(len(ck.servers))
 			continue
 		}
 		//如果查询到的结果为空, 直接return
-		if reply.Err == ErrNoKey {
-			DPrintf(dGet, "C%v <- R%d receive empty result, No key!", ck.clientId, leaderId)
-			return reply
+		if reply.Status == ErrNoKey {
+			DPrintf(dCommand, "C%v <- R%d receive empty result, No key!", ck.clientId, leaderId)
+		} else {
+			DPrintf(dCommand, "C%v <- R%d receive successful result. [args=%v, reply=%v]", ck.clientId, leaderId, args, reply)
 		}
-		DPrintf(dGet, "C%v <- R%d receive successful Get result=%v", ck.clientId, leaderId, reply)
 		ck.seq++ //seq自增
 		return reply
 	}
