@@ -111,26 +111,40 @@ func (ck *Clerk) sendCommand(key string, value string, op string) CmdReply {
 	}
 	// 用leaderid记录下当前尝试的leader, 并在每次成功的时候都更新
 	leaderId := ck.leaderId
-	defer func() { ck.leaderId = leaderId }()
+	// 退出的时候, 肯定是找到leader并执行了rpc, 因此要更新对应的结构
+	defer func() {
+		ck.leaderId = leaderId
+		ck.seq++ //seq自增
+	}()
 	for {
 		// 一直重试请求直到成功
 		reply := CmdReply{}
 		DPrintf(dCommand, "C%d -> R%d send Command rpc, args = %v", ck.clientId, leaderId, args)
 		ok := ck.servers[leaderId].Call("KVServer.HandlerCommand", &args, &reply)
-		// 如果失败, 或是超时和错误的leader, 都换一个再次尝试, 这里用的是轮询的方式
-		if !ok || reply.Status == ErrWrongLeader || reply.Status == ErrTimeout {
+
+		if !ok {
+			// rpc通信失败, 需要换个leader重传, 这里用的是轮询的方式
 			DPrintf(dCommand, "C%v <- R%d receive failed rpc for [ok=%v, reply=%v], retry R%d",
 				ck.clientId, leaderId, ok, reply, (leaderId+1)%int64(len(ck.servers)))
 			leaderId = (leaderId + 1) % int64(len(ck.servers))
 			continue
-		}
-		//如果查询到的结果为空, 直接return
-		if reply.Status == ErrNoKey {
-			DPrintf(dCommand, "C%v <- R%d receive empty result, No key!", ck.clientId, leaderId)
 		} else {
-			DPrintf(dCommand, "C%v <- R%d receive successful result. [args=%v, reply=%v]", ck.clientId, leaderId, args, reply)
+			switch reply.Status {
+			case ErrWrongLeader, ErrTimeout:
+				// 如果失败, 或是超时和错误的leader, 都换leader重传
+				DPrintf(dCommand, "C%v <- R%d receive failed result, [ok=%v, reply=%v], retry R%d",
+					ck.clientId, leaderId, ok, reply, (leaderId+1)%int64(len(ck.servers)))
+				leaderId = (leaderId + 1) % int64(len(ck.servers))
+				continue
+			case ErrNoKey:
+				// 如果查询结果失败, 则返回空
+				DPrintf(dCommand, "C%v <- R%d receive empty result, No key!", ck.clientId, leaderId)
+				return reply
+			default:
+				// 默认都是OK的, 直接返回结果就行
+				DPrintf(dCommand, "C%v <- R%d receive successful result. [args=%v, reply=%v]", ck.clientId, leaderId, args, reply)
+				return reply
+			}
 		}
-		ck.seq++ //seq自增
-		return reply
 	}
 }

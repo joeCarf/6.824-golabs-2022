@@ -157,9 +157,13 @@ func (s *SafeEntryLog) at(index int) Entry {
 //  @return int 这个日志的index
 //
 func (rf *Raft) appendNewEntryToLog(command interface{}) int {
+	// 还是这个问题, 锁的粒度还是保持尽可能大, 因为这里进来后, 有可能不再是leader了
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	defer rf.persist()
+	if rf.state != LEADER {
+		return -1
+	}
 	e := Entry{
 		Term:     rf.currentTerm,
 		Index:    rf.log.lastEntry().Index + 1,
@@ -269,18 +273,17 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		return
 	}
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// 如果index大于commitIndex, 说明还没commit, 所以不能安装快照
 	if index > rf.commitIndex {
 		DPrintf(dSnapshot, "T%d: S%d cannot Snapshot() for not committed. [index=%v, commitIndex=%v]",
 			rf.currentTerm, rf.me, index, rf.commitIndex)
-		rf.mu.Unlock()
 		return
 	}
 	// 如果index小于快照点lastIncludeIndex, 说明已经装过了, 这部分不需要装快照
 	if index <= rf.log.lastIncludeEntry().Index {
 		DPrintf(dSnapshot, "T%d: S%d cannot Snapshot() for has snapshotted. [index=%v, lastIncludeIndex=%v]",
 			rf.currentTerm, rf.me, index, rf.log.lastIncludeEntry().Index)
-		rf.mu.Unlock()
 		return
 	}
 	// 后面需要进行建立快照
@@ -298,8 +301,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	//DPrintf(dLog, "T%d, S%d here2!", rf.currentTerm, rf.me)
 
 	rf.persistWithSnapshot(snapshot)
-	DPrintf(dLog, "T%d, S%d here1!", rf.currentTerm, rf.me)
-	rf.mu.Unlock()
 }
 
 //

@@ -4,6 +4,7 @@ import (
 	"6.824/labgob"
 	"6.824/labrpc"
 	"6.824/raft"
+	"bytes"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -209,60 +210,79 @@ func (kv *KVServer) applier() {
 		// 阻塞的从applyCh读取rf传递过来的消息
 		// NOTE: applier收到的msg有两种: 一种是client的leader主动apply的, 另一种是follower收到leader同步给它的
 		applyMsg := <-kv.applyCh
-		if applyMsg.CommandValid == false {
-			DPrintf(dApply, "R%d received invalided apply message! [applyMsg=%v]", me, applyMsg)
-			continue
-		}
-		op := applyMsg.Command.(Op) // 通过类型断言, 将接口转为Op类型
-		index := applyMsg.CommandIndex
-		term := applyMsg.CommandTerm
-		kv.mu.Lock()
-		// NOTE: 要小心日志的rollback, 因为raft去applyCh是不能保证原子性的, chan里的日志可能是乱序的, 所以要有一个lastApplied来保证不会回滚
-		// 如果收到的是一个过时的旧日志, 直接抛弃, 避免出现log rollback
-		if index <= kv.lastApplied {
-			DPrintf(dApply, "R%d received out of date command and drop it. [applyMsg=%v]", me, applyMsg)
-			kv.mu.Unlock()
-			continue
-		}
-		kv.lastApplied = index
-		kv.mu.Unlock()
-		// 将这个已经commit掉的日志应用到数据库里
-		// NOTE: 在应用状态机之前, 务必检查是否是重复操作, 保持线性一致性, 而且必须在这里检查而不能在handler处检查, 因为follower的状态机不是通过handler而是通过leader的apply同步过来的.
-		// NOTE: 只需要去重写请求即可, 读请求重复不会有一致性问题
-		var msg Message
-		if isDuplicated, value := kv.isDuplicatedCommand(op.Seq, op.ClientId); op.Opt != GET && isDuplicated {
-			// 如果是重复的操作, 直接从最新的写操作里面拿到最新的写值即可
-			DPrintf(dApply, "R%d received duplicate command. [op=%v]", me, op)
-			msg.Payload, msg.Err = value, ""
-		} else {
-			// 不重复的最新操作, 才需要应用到状态机
-			DPrintf(dApply, "R%d applied cmd to database, op=%v", me, op)
-			msg = kv.applyToDatabase(op)
-			// 只有写操作才需要更新lastOperation, 因为读操作不会引起一致性问题
+		if applyMsg.CommandValid == true {
+			op := applyMsg.Command.(Op) // 通过类型断言, 将接口转为Op类型
+			index := applyMsg.CommandIndex
+			term := applyMsg.CommandTerm
 			kv.mu.Lock()
-			if op.Opt != GET {
-				kv.lastOperations[op.ClientId] = Operation{
-					Opt:      op.Opt,
-					Key:      op.Key,
-					Value:    op.Value,
-					ClientId: op.ClientId,
-					Seq:      op.Seq,
+			// NOTE: 要小心日志的rollback, 因为raft去applyCh是不能保证原子性的, chan里的日志可能是乱序的, 所以要有一个lastApplied来保证不会回滚
+			// 如果收到的是一个过时的旧日志, 直接抛弃, 避免出现log rollback
+			if index <= kv.lastApplied {
+				DPrintf(dApply, "R%d received out of date command and drop it. [applyMsg=%v]", me, applyMsg)
+				kv.mu.Unlock()
+				continue
+			}
+			kv.lastApplied = index
+			kv.mu.Unlock()
+			// 将这个已经commit掉的日志应用到数据库里
+			// NOTE: 在应用状态机之前, 务必检查是否是重复操作, 保持线性一致性, 而且必须在这里检查而不能在handler处检查, 因为follower的状态机不是通过handler而是通过leader的apply同步过来的.
+			// NOTE: 只需要去重写请求即可, 读请求重复不会有一致性问题
+			var msg Message
+			if isDuplicated, value := kv.isDuplicatedCommand(op.Seq, op.ClientId); op.Opt != GET && isDuplicated {
+				// 如果是重复的操作, 直接从最新的写操作里面拿到最新的写值即可
+				DPrintf(dApply, "R%d received duplicate command. [op=%v]", me, op)
+				msg.Payload, msg.Err = value, ""
+			} else {
+				// 不重复的最新操作, 才需要应用到状态机
+				DPrintf(dApply, "R%d applied cmd to database, op=%v", me, op)
+				msg = kv.applyToDatabase(op)
+				kv.mu.Lock()
+				// 只有写操作才需要更新lastOperation, 因为读操作不会引起一致性问题
+				if op.Opt != GET {
+					kv.lastOperations[op.ClientId] = Operation{
+						Opt:      op.Opt,
+						Key:      op.Key,
+						Value:    op.Value,
+						ClientId: op.ClientId,
+						Seq:      op.Seq,
+					}
 				}
+				kv.mu.Unlock()
+			}
+			// 将返回值通过ch通知对应的client发送端
+			// NOTE: 只有当前还是leader, 才需要通知对应的client
+			// NOTE: 不只是当前还是leader, 必须这个日志也是这个term内的日志才行, 如果是顺带提交之前term的日志, 也是不能通知client的, 否则会阻塞
+			if currentTerm, isLeader := kv.rf.GetState(); isLeader && currentTerm == term {
+				kv.mu.RLock()
+				// NOTE: 同样的问题, 在使用map之前, 先检查map中对象是否还存在
+				// NOTE: 遇到的bug是, 如果发生了超时, 导致对应的chan已经关闭, map中对应项已经delete, 此时ch就是一个零值nil的chan, 而从一个零值nil chan里读会永久阻塞
+				if ch, ok := kv.notifyChan[index]; ok {
+					ch <- msg
+					DPrintf(dApply, "R%d send apply reply to client, op=%v", me, op)
+				}
+				kv.mu.RUnlock()
+			}
+			kv.mu.Lock()
+			// 判断是否需要快照, 当需要快照, 且本地log超过maxraftstate的时候需要建立快照
+			if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() > kv.maxraftstate {
+				//对KVServer中的特有的结构进行快照
+				snapshot := kv.makeSnapshot()
+				kv.rf.Snapshot(index, snapshot)
+				DPrintf(dApply, "R%d over maxraftstate call rf.Snapshot to install snapshot, index=%v", me, index)
 			}
 			kv.mu.Unlock()
-		}
-		// 将返回值通过ch通知对应的client发送端
-		// NOTE: 只有当前还是leader, 才需要通知对应的client
-		// NOTE: 不只是当前还是leader, 必须这个日志也是这个term内的日志才行, 如果是顺带提交之前term的日志, 也是不能通知client的, 否则会阻塞
-		if currentTerm, isLeader := kv.rf.GetState(); isLeader && currentTerm == term {
-			kv.mu.RLock()
-			// NOTE: 同样的问题, 在使用map之前, 先检查map中对象是否还存在
-			// NOTE: 遇到的bug是, 如果发生了超时, 导致对应的chan已经关闭, map中对应项已经delete, 此时ch就是一个零值nil的chan, 而从一个零值nil chan里读会永久阻塞
-			if ch, ok := kv.notifyChan[index]; ok {
-				ch <- msg
-				DPrintf(dApply, "R%d send apply reply to client, op=%v", me, op)
+		} else if applyMsg.SnapshotValid == true {
+			//follower收到了raft传来的建立快照的消息, 建立对应的快照
+			kv.mu.Lock()
+			if kv.rf.CondInstallSnapshot(applyMsg.SnapshotTerm, applyMsg.SnapshotIndex, applyMsg.Snapshot) {
+				kv.installSnapshot(applyMsg.Snapshot)
+				DPrintf(dApply, "R%d install snapshot from leader, [msg=%v]", kv.me, applyMsg)
+				// 从快照中更新kv后, 不要忘记更新kv.lastApplied
+				kv.lastApplied = applyMsg.SnapshotIndex
 			}
-			kv.mu.RUnlock()
+			kv.mu.Unlock()
+		} else {
+			DPrintf(dApply, "R%d received unknown message, [msg=%v]", me, applyMsg)
 		}
 	}
 }
@@ -294,6 +314,56 @@ func (kv *KVServer) applyToDatabase(op Op) Message {
 		//DPrintf(dApply, "R%d apply cmd to db failed, unexpected opt type, op=%v", me, op)
 	}
 	return msg
+}
+
+//========================快照持久化相关========================//
+//
+// persistWithSnapshot
+//  @Description: 将KVServer的结构序列化为字节流
+//  @receiver kv
+//  @return []byte
+//
+func (kv *KVServer) makeSnapshot() []byte {
+	// 持久化KVServer中的结构, 包括KVdb和
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	if e.Encode(kv.lastApplied) != nil ||
+		e.Encode(kv.db.db) != nil ||
+		e.Encode(kv.lastOperations) != nil {
+		DPrintf(dError, "R%d encode fail", kv.me)
+	}
+	return w.Bytes()
+}
+
+//
+// installSnapshot
+//  @Description: 安装快照, 就是反序列化字节流
+//  @receiver kv
+//  @param snapshot
+//
+func (kv *KVServer) installSnapshot(snapshot []byte) {
+	if snapshot == nil || len(snapshot) < 1 { // bootstrap without any state?
+		return
+	}
+	// Your code here (2C).
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+
+	var lastApplied int
+	var db map[string]string
+	var lastOperations map[int64]Operation
+
+	if d.Decode(&lastApplied) != nil ||
+		d.Decode(&db) != nil ||
+		d.Decode(&lastOperations) != nil {
+		DPrintf(dError, "R%d decode fail", kv.me)
+		panic("encode fail")
+	}
+	kv.lastApplied = lastApplied
+	kv.db.db = db
+	kv.lastOperations = lastOperations
+	DPrintf(dSnapshot, "R%d read persist: [lastApplied=%v, db=%v, lastOperations=%v]",
+		kv.me, lastOperations, db, lastOperations)
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -345,6 +415,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.notifyChan = make(map[int]chan Message)
 	kv.db = NewKVdb()
 	kv.lastOperations = make(map[int64]Operation)
+
+	//crash时记得恢复快照
+	snapshot := persister.ReadSnapshot()
+	if len(snapshot) > 0 {
+		kv.installSnapshot(snapshot)
+	}
 
 	// 开启一个后台协程来监听applyChan
 	go kv.applier()

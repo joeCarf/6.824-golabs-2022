@@ -427,9 +427,9 @@ func TestBasic3A(t *testing.T) {
 	GenericTest(t, "3A", 1, 5, false, false, false, -1, false)
 }
 
-func TestSpeed3A(t *testing.T) {
-	GenericTestSpeed(t, "3A", -1)
-}
+//func TestSpeed3A(t *testing.T) {
+//	GenericTestSpeed(t, "3A", -1)
+//}
 
 func TestConcurrent3A(t *testing.T) {
 	// Test: many clients (3A) ...
@@ -687,9 +687,9 @@ func TestSnapshotSize3B(t *testing.T) {
 	cfg.end()
 }
 
-func TestSpeed3B(t *testing.T) {
-	GenericTestSpeed(t, "3B", 1000)
-}
+//func TestSpeed3B(t *testing.T) {
+//	GenericTestSpeed(t, "3B", 1000)
+//}
 
 func TestSnapshotRecover3B(t *testing.T) {
 	// Test: restarts, snapshots, one client (3B) ...

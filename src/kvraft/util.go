@@ -21,13 +21,15 @@ import (
 type logTopic string
 
 const (
-	dClient  logTopic = "CLIENT"
-	dServer  logTopic = "SERVER"
-	dCommand logTopic = "COMAND"
-	dGet     logTopic = "GETOPT"
-	dPut     logTopic = "PUTOPT"
-	dAppend  logTopic = "APPEND"
-	dApply   logTopic = "APPLYS"
+	dClient   logTopic = "CLIENT"
+	dServer   logTopic = "SERVER"
+	dCommand  logTopic = "COMAND"
+	dGet      logTopic = "GETOPT"
+	dPut      logTopic = "PUTOPT"
+	dAppend   logTopic = "APPEND"
+	dApply    logTopic = "APPLYS"
+	dError    logTopic = "ERRORS"
+	dSnapshot logTopic = "SPSHOT"
 )
 
 var debugStart time.Time
