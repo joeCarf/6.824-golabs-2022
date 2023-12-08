@@ -29,45 +29,87 @@ type Config struct {
 }
 
 const (
-	OK = "OK"
+	OK             = "OK"
+	ErrNoKey       = "ErrNoKey"
+	ErrWrongLeader = "ErrWrongLeader"
+	ErrTimeout     = "ErrTimeout"
+	ErrOutofDate   = "ErrOutofDate"
 )
 
 type Err string
 
-type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
+// =============区分request的类型================//
+type OptType int
+
+const (
+	JOIN OptType = iota
+	LEAVE
+	MOVE
+	QUERY
+)
+
+// ==============Cmd=[Get,Put,Append]=================//
+type CmdArgs struct {
+	Op       OptType          //cmd的类型
+	Servers  map[int][]string //for join
+	GIDs     []int            //for leave
+	Shard    int              //for move
+	GID      int              //for move
+	Num      int              //for query
+	ClientId int64            //发送cmd的client id
+	Seq      int64            //标识cmd的seq
+}
+type CmdReply struct {
+	Status Err    //错误类型
+	Config Config //返回值
 }
 
-type JoinReply struct {
-	WrongLeader bool
-	Err         Err
+// ==================Message: applier和client间传递的消息类型==============//
+type Message struct {
+	Payload Config
+	Err     Err
 }
 
-type LeaveArgs struct {
-	GIDs []int
-}
-
-type LeaveReply struct {
-	WrongLeader bool
-	Err         Err
-}
-
-type MoveArgs struct {
-	Shard int
-	GID   int
-}
-
-type MoveReply struct {
-	WrongLeader bool
-	Err         Err
-}
-
-type QueryArgs struct {
-	Num int // desired config number
-}
-
-type QueryReply struct {
-	WrongLeader bool
-	Err         Err
-	Config      Config
-}
+//const (
+//	OK = "OK"
+//)
+//
+//type Err string
+//
+//type JoinArgs struct {
+//	Servers map[int][]string // new GID -> servers mappings
+//}
+//
+//type JoinReply struct {
+//	WrongLeader bool
+//	Err         Err
+//}
+//
+//type LeaveArgs struct {
+//	GIDs []int
+//}
+//
+//type LeaveReply struct {
+//	WrongLeader bool
+//	Err         Err
+//}
+//
+//type MoveArgs struct {
+//	Shard int
+//	GID   int
+//}
+//
+//type MoveReply struct {
+//	WrongLeader bool
+//	Err         Err
+//}
+//
+//type QueryArgs struct {
+//	Num int // desired config number
+//}
+//
+//type QueryReply struct {
+//	WrongLeader bool
+//	Err         Err
+//	Config      Config
+//}
