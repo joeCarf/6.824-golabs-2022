@@ -7,15 +7,17 @@ package labgob
 // about non-capitalized field names.
 //
 
-import "encoding/gob"
+import (
+	"encoding/gob"
+	"github.com/sasha-s/go-deadlock"
+)
 import "io"
 import "reflect"
 import "fmt"
-import "sync"
 import "unicode"
 import "unicode/utf8"
 
-var mu sync.Mutex
+var mu deadlock.Mutex
 var errorCount int // for TestCapital
 var checked map[reflect.Type]bool
 

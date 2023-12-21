@@ -42,7 +42,7 @@ func random_handles(kvh []*labrpc.ClientEnd) []*labrpc.ClientEnd {
 }
 
 type config struct {
-	mu           sync.Mutex
+	mu           deadlock.Mutex
 	t            *testing.T
 	net          *labrpc.Network
 	n            int

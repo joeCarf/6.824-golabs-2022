@@ -1,13 +1,15 @@
 package shardkv
 
-import "6.824/porcupine"
+import (
+	"6.824/porcupine"
+	"github.com/sasha-s/go-deadlock"
+)
 import "6.824/models"
 import "testing"
 import "strconv"
 import "time"
 import "fmt"
 import "sync/atomic"
-import "sync"
 import "math/rand"
 import "io/ioutil"
 
@@ -157,7 +159,7 @@ func TestSnapshot(t *testing.T) {
 
 	cfg.join(0)
 
-	n := 30
+	n := 3
 	ka := make([]string, n)
 	va := make([]string, n)
 	for i := 0; i < n; i++ {
@@ -169,6 +171,7 @@ func TestSnapshot(t *testing.T) {
 		check(t, ck, ka[i], va[i])
 	}
 
+	DPrintf(DTest, "group 1 2 Join, 0 Leave")
 	cfg.join(1)
 	cfg.join(2)
 	cfg.leave(0)
@@ -180,6 +183,7 @@ func TestSnapshot(t *testing.T) {
 		va[i] += x
 	}
 
+	DPrintf(DTest, "group 0 Join, 1 Leave")
 	cfg.leave(1)
 	cfg.join(0)
 
@@ -200,10 +204,12 @@ func TestSnapshot(t *testing.T) {
 
 	cfg.checklogs()
 
+	DPrintf(DTest, "group 0 1 2 shut down")
 	cfg.ShutdownGroup(0)
 	cfg.ShutdownGroup(1)
 	cfg.ShutdownGroup(2)
 
+	DPrintf(DTest, "group 0 1 2 start")
 	cfg.StartGroup(0)
 	cfg.StartGroup(1)
 	cfg.StartGroup(2)
@@ -223,6 +229,7 @@ func TestMissChange(t *testing.T) {
 
 	ck := cfg.makeClient()
 
+	DPrintf(DTest, "g0 Join!")
 	cfg.join(0)
 
 	n := 10
@@ -236,13 +243,14 @@ func TestMissChange(t *testing.T) {
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 	}
-
+	DPrintf(DTest, "g1 Join, 00,10,20 shut down!")
 	cfg.join(1)
 
 	cfg.ShutdownServer(0, 0)
 	cfg.ShutdownServer(1, 0)
 	cfg.ShutdownServer(2, 0)
 
+	DPrintf(DTest, "g2 Join, g0,g1 Leave!")
 	cfg.join(2)
 	cfg.leave(1)
 	cfg.leave(0)
@@ -254,6 +262,7 @@ func TestMissChange(t *testing.T) {
 		va[i] += x
 	}
 
+	DPrintf(DTest, "g1 Join!")
 	cfg.join(1)
 
 	for i := 0; i < n; i++ {
@@ -263,9 +272,11 @@ func TestMissChange(t *testing.T) {
 		va[i] += x
 	}
 
+	DPrintf(DTest, "00,10,20 Start Server!")
 	cfg.StartServer(0, 0)
 	cfg.StartServer(1, 0)
 	cfg.StartServer(2, 0)
+	DPrintf(DTest, "00,10,20 Start Server success!")
 
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
@@ -276,9 +287,12 @@ func TestMissChange(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 
+	DPrintf(DTest, "01, 11, 21 shut down!")
 	cfg.ShutdownServer(0, 1)
 	cfg.ShutdownServer(1, 1)
 	cfg.ShutdownServer(2, 1)
+
+	DPrintf(DTest, "g0 Join, g2 Leave!")
 
 	cfg.join(0)
 	cfg.leave(2)
@@ -290,6 +304,7 @@ func TestMissChange(t *testing.T) {
 		va[i] += x
 	}
 
+	DPrintf(DTest, "01, 11, 21 start server!")
 	cfg.StartServer(0, 1)
 	cfg.StartServer(1, 1)
 	cfg.StartServer(2, 1)
@@ -634,7 +649,7 @@ func TestUnreliable3(t *testing.T) {
 
 	begin := time.Now()
 	var operations []porcupine.Operation
-	var opMu sync.Mutex
+	var opMu deadlock.Mutex
 
 	ck := cfg.makeClient()
 

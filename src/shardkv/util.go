@@ -1,4 +1,4 @@
-package raft
+package shardkv
 
 import (
 	"fmt"
@@ -21,31 +21,30 @@ import (
 type logTopic string
 
 const (
-	dClient   logTopic = "CLNT"
-	dError    logTopic = "ERRO"
-	dLog      logTopic = "LOGS"
-	dHeart    logTopic = "HRBT"
-	dVote     logTopic = "VOTE"
-	dTicker   logTopic = "TICK"
-	dStart    logTopic = "STAR"
-	dAppend   logTopic = "APED"
-	dApply    logTopic = "APPY"
-	dCommit   logTopic = "COMT"
-	dPersist  logTopic = "PRST"
-	dSnapshot logTopic = "SNAP"
-	dTest     logTopic = "TEST"
+	DClient    logTopic = "CLIENT"
+	DCommand   logTopic = "CMD   "
+	DApply     logTopic = "APPLYS"
+	DError     logTopic = "ERROR "
+	DTest      logTopic = "TEST  "
+	DLog       logTopic = "LOG   "
+	DSnapshot  logTopic = "SNAP  "
+	DConfig    logTopic = "CONFIG"
+	DOPeration logTopic = "OP    "
+	DPull      logTopic = "PULL  "
+	DRemove    logTopic = "REMOVE"
+	DNoop      logTopic = "NOOP"
 )
 
 var debugStart time.Time
-var DebugVerbosity int
+var debugVerbosity int
 
 func init() {
-	DebugVerbosity = getVerboisty()
+	debugVerbosity = getVerboisty()
 	debugStart = time.Now()
 
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 	//如果VERBOSE = 2, 将日志打印到文件里
-	if DebugVerbosity == 2 {
+	if debugVerbosity == 2 {
 		file := "logs.txt"
 		logFile, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0766)
 		if err != nil {
@@ -55,9 +54,9 @@ func init() {
 	}
 }
 
-//从环境变量里读到日志level
+// 从环境变量里读到日志level
 func getVerboisty() int {
-	v := os.Getenv("VERBOSE")
+	v := os.Getenv("VERBOSE_SCKV")
 	level := 0
 	if v != "" {
 		var err error
@@ -70,10 +69,10 @@ func getVerboisty() int {
 }
 
 func DPrintf(topic logTopic, format string, a ...interface{}) {
-	if DebugVerbosity >= 1 {
+	if debugVerbosity >= 1 {
 		time := time.Since(debugStart).Microseconds()
 		time /= 100
-		prefix := fmt.Sprintf("%06d %v %v ", time, "Raft   ", string(topic))
+		prefix := fmt.Sprintf("%06d %v %v ", time, "ShardKv", string(topic))
 		format = prefix + format
 		log.Printf(format, a...)
 	}

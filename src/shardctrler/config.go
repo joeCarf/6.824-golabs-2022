@@ -1,6 +1,9 @@
 package shardctrler
 
-import "6.824/labrpc"
+import (
+	"6.824/labrpc"
+	"github.com/sasha-s/go-deadlock"
+)
 import "6.824/raft"
 import "testing"
 import "os"
@@ -9,7 +12,6 @@ import "os"
 import crand "crypto/rand"
 import "math/rand"
 import "encoding/base64"
-import "sync"
 import "runtime"
 import "time"
 
@@ -32,7 +34,7 @@ func random_handles(kvh []*labrpc.ClientEnd) []*labrpc.ClientEnd {
 }
 
 type config struct {
-	mu           sync.Mutex
+	mu           deadlock.Mutex
 	t            *testing.T
 	net          *labrpc.Network
 	n            int

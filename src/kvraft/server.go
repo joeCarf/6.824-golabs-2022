@@ -5,7 +5,7 @@ import (
 	"6.824/labrpc"
 	"6.824/raft"
 	"bytes"
-	"sync"
+	"github.com/sasha-s/go-deadlock"
 	"sync/atomic"
 	"time"
 )
@@ -35,7 +35,7 @@ type Op struct {
 // 定义线程安全的kv database, 就是底层的state machine
 // 这里相当于直接定义的内存里的kv, 实际上在生产级别的 KV 服务中，数据不可能全存在内存中，系统往往采用的是 LSM 的架构，例如 RocksDB.
 type KVdb struct {
-	mu sync.RWMutex      //保证互斥访问的锁
+	mu deadlock.RWMutex  //保证互斥访问的锁
 	db map[string]string //用一个map来模拟kv数据库
 }
 
@@ -45,7 +45,7 @@ type KVdb struct {
 //	@return *KVdb
 func NewKVdb() KVdb {
 	return KVdb{
-		mu: sync.RWMutex{},
+		mu: deadlock.RWMutex{},
 		db: make(map[string]string),
 	}
 }
@@ -95,7 +95,7 @@ func (k *KVdb) Append(key string, args string) {
 type Operation Op
 
 type KVServer struct {
-	mu      sync.RWMutex
+	mu      deadlock.RWMutex
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
@@ -129,6 +129,16 @@ func (kv *KVServer) isDuplicatedCommand(seq int64, clientId int64) (bool, string
 		return seq == lastOperation.Seq, lastOperation.Value
 	} else {
 		return false, ""
+	}
+}
+func (kv *KVServer) isOutDatedCommand(seq int64, clientId int64) bool {
+	kv.mu.RLock()
+	defer kv.mu.RUnlock()
+	lastOperation, ok := kv.lastOperations[clientId]
+	if ok {
+		return lastOperation.Seq > seq
+	} else {
+		return false
 	}
 }
 
@@ -228,6 +238,12 @@ func (kv *KVServer) applier() {
 			// NOTE: 在应用状态机之前, 务必检查是否是重复操作, 保持线性一致性, 而且必须在这里检查而不能在handler处检查, 因为follower的状态机不是通过handler而是通过leader的apply同步过来的.
 			// NOTE: 只需要去重写请求即可, 读请求重复不会有一致性问题
 			var msg Message
+			// NOTE: 除了重复, 还必须抛弃过时的command, 防止覆盖状态机引起不一致问题
+			if isOutDated := kv.isOutDatedCommand(op.Seq, op.ClientId); isOutDated {
+				DPrintf(dApply, "R%d received out of dated command. [op=%v]", me, op)
+				msg.Payload, msg.Err = "", ErrOutofDate
+				return
+			}
 			if isDuplicated, value := kv.isDuplicatedCommand(op.Seq, op.ClientId); op.Opt != GET && isDuplicated {
 				// 如果是重复的操作, 直接从最新的写操作里面拿到最新的写值即可
 				DPrintf(dApply, "R%d received duplicate command. [op=%v]", me, op)
@@ -256,11 +272,13 @@ func (kv *KVServer) applier() {
 				kv.mu.RLock()
 				// NOTE: 同样的问题, 在使用map之前, 先检查map中对象是否还存在
 				// NOTE: 遇到的bug是, 如果发生了超时, 导致对应的chan已经关闭, map中对应项已经delete, 此时ch就是一个零值nil的chan, 而从一个零值nil chan里读会永久阻塞
-				if ch, ok := kv.notifyChan[index]; ok {
+				ch, ok := kv.notifyChan[index]
+				kv.mu.RUnlock()
+				if ok {
 					ch <- msg
 					DPrintf(dApply, "R%d send apply reply to client, op=%v", me, op)
 				}
-				kv.mu.RUnlock()
+
 			}
 			kv.mu.Lock()
 			// 判断是否需要快照, 当需要快照, 且本地log超过maxraftstate的时候需要建立快照
@@ -343,6 +361,9 @@ func (kv *KVServer) makeSnapshot() []byte {
 //
 func (kv *KVServer) installSnapshot(snapshot []byte) {
 	if snapshot == nil || len(snapshot) < 1 { // bootstrap without any state?
+		kv.lastApplied = 0
+		kv.db.db = make(map[string]string)
+		kv.lastOperations = make(map[int64]Operation)
 		return
 	}
 	// Your code here (2C).

@@ -3,14 +3,14 @@ package shardctrler
 import (
 	"6.824/raft"
 	"fmt"
+	"github.com/sasha-s/go-deadlock"
 	"time"
 )
 import "6.824/labrpc"
-import "sync"
 import "6.824/labgob"
 
 type ShardCtrler struct {
-	mu      sync.RWMutex
+	mu      deadlock.RWMutex
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
@@ -78,6 +78,16 @@ func (sc *ShardCtrler) isDuplicatedCommand(seq int64, clientId int64) (bool, Con
 		return seq == lastOperation.Seq, lastOperation.Cfg
 	} else {
 		return false, Config{}
+	}
+}
+func (sc *ShardCtrler) isOutDatedCommand(seq int64, clientId int64) bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	lastOperation, ok := sc.lastOperations[clientId]
+	if ok {
+		return lastOperation.Seq > seq
+	} else {
+		return false
 	}
 }
 
@@ -175,6 +185,11 @@ func (sc *ShardCtrler) applier() {
 			// 将这个已经commit掉的日志应用到数据库里
 			// 在应用状态机之前, 务必检查是否是重复操作, 保持线性一致性
 			var msg Message
+			if isOutDated := sc.isOutDatedCommand(op.Seq, op.ClientId); isOutDated {
+				DPrintf(dApply, "R%d received out of dated command. [op=%v]", me, op)
+				msg.Payload, msg.Err = Config{}, ErrOutofDate
+				return
+			}
 			if isDuplicated, value := sc.isDuplicatedCommand(op.Seq, op.ClientId); op.Opt != QUERY && isDuplicated {
 				// 如果是重复的操作, 直接从最新的写操作里面拿到最新的写值即可
 				DPrintf(dApply, "R%d received duplicate command. [op=%v]", me, op)
@@ -203,11 +218,12 @@ func (sc *ShardCtrler) applier() {
 			// 将返回值通过ch通知对应的client发送端, 条件是必须是leader且term对应
 			if currentTerm, isLeader := sc.rf.GetState(); isLeader && currentTerm == term {
 				sc.mu.RLock()
-				if ch, ok := sc.notifyChan[index]; ok {
+				ch, ok := sc.notifyChan[index]
+				sc.mu.RUnlock()
+				if ok {
 					ch <- msg
 					DPrintf(dApply, "R%d send apply reply to client, op=%v", me, op)
 				}
-				sc.mu.RUnlock()
 			}
 		} else {
 			DPrintf(dApply, "R%d received unknown message, [msg=%v]", me, applyMsg)
@@ -267,7 +283,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 
 	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)
-	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
+	sc.rf = raft.Make(servers, me, persister, sc.applyCh, true)
 
 	// Your code here.
 	sc.db = NewCfgDB()

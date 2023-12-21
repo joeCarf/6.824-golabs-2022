@@ -1,8 +1,8 @@
 package shardctrler
 
 import (
+	"github.com/sasha-s/go-deadlock"
 	"sort"
-	"sync"
 )
 
 /**
@@ -13,8 +13,8 @@ import (
 
 //==============定义线程安全的kv database, 就是底层的state machine=================
 type CfgDB struct {
-	mu      sync.RWMutex //保证互斥访问的锁
-	configs []Config     //底层的数据库
+	mu      deadlock.RWMutex //保证互斥访问的锁
+	configs []Config         //底层的数据库
 }
 
 //
@@ -24,7 +24,7 @@ type CfgDB struct {
 //
 func NewCfgDB() *CfgDB {
 	cfgdb := CfgDB{
-		mu:      sync.RWMutex{},
+		mu:      deadlock.RWMutex{},
 		configs: make([]Config, 1),
 	}
 	cfgdb.configs[0].Groups = map[int][]string{}
@@ -58,7 +58,7 @@ func (cf *CfgDB) Join(group map[int][]string) Err {
 	// 需要做负载均衡, load balance
 	loadBalanceJoin(newCfg)
 	cf.configs = append(cf.configs, *newCfg)
-	DPrintf(dJoin, "Join: [configs=%v]", cf.configs)
+	//DPrintf(dJoin, "Join: [configs=%v]", cf.configs)
 	return OK
 }
 
@@ -104,7 +104,7 @@ func (cf *CfgDB) Leave(gids []int) Err {
 func (cf *CfgDB) Move(shard int, gid int) Err {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
-	//NOTE: 注意这里必须是深拷贝, 深拷贝创建一个新的config
+	//NOTE: 注意这里必须是深拷贝, 深拷贝创建一个新的config, 否则会与旧config指向同一片空间
 	newCfg := cf.newConfigDeepCopy()
 	newCfg.Shards[shard] = gid
 	cf.configs = append(cf.configs, *newCfg)

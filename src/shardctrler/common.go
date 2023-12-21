@@ -70,6 +70,14 @@ type Message struct {
 	Err     Err
 }
 
+func DefaultConfig() Config {
+	return Config{
+		Num:    0,
+		Shards: [NShards]int{},
+		Groups: make(map[int][]string),
+	}
+}
+
 //const (
 //	OK = "OK"
 //)

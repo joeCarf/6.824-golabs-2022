@@ -1,6 +1,9 @@
 package shardkv
 
-import "6.824/shardctrler"
+import (
+	"6.824/shardctrler"
+	"github.com/sasha-s/go-deadlock"
+)
 import "6.824/labrpc"
 import "testing"
 import "os"
@@ -51,7 +54,7 @@ type group struct {
 }
 
 type config struct {
-	mu    sync.Mutex
+	mu    deadlock.Mutex
 	t     *testing.T
 	net   *labrpc.Network
 	start time.Time // time at which make_config() was called
