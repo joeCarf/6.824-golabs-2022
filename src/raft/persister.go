@@ -9,12 +9,10 @@ package raft
 // test with the original before submitting.
 //
 
-import (
-	"github.com/sasha-s/go-deadlock"
-)
+import "sync"
 
 type Persister struct {
-	mu        deadlock.Mutex
+	mu        sync.Mutex
 	raftstate []byte
 	snapshot  []byte
 }

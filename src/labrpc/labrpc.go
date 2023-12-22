@@ -49,12 +49,10 @@ package labrpc
 //   pass svc to srv.AddService()
 //
 
-import (
-	"6.824/labgob"
-	"github.com/sasha-s/go-deadlock"
-)
+import "6.824/labgob"
 import "bytes"
 import "reflect"
+import "sync"
 import "log"
 import "strings"
 import "math/rand"
@@ -125,7 +123,7 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 }
 
 type Network struct {
-	mu             deadlock.Mutex
+	mu             sync.Mutex
 	reliable       bool
 	longDelays     bool                        // pause a long time on send on disabled connection
 	longReordering bool                        // sometimes delay replies a long time
@@ -387,7 +385,7 @@ func (rn *Network) GetTotalBytes() int64 {
 // and a k/v server can listen to the same rpc endpoint.
 //
 type Server struct {
-	mu       deadlock.Mutex
+	mu       sync.Mutex
 	services map[string]*Service
 	count    int // incoming RPCs
 }

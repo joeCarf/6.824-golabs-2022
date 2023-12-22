@@ -37,15 +37,15 @@ const (
 )
 
 var debugStart time.Time
-var DebugVerbosity int
+var debugVerbosity int
 
 func init() {
-	DebugVerbosity = getVerboisty()
+	debugVerbosity = getVerboisty()
 	debugStart = time.Now()
 
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 	//如果VERBOSE = 2, 将日志打印到文件里
-	if DebugVerbosity == 2 {
+	if debugVerbosity == 2 {
 		file := "logs.txt"
 		logFile, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0766)
 		if err != nil {
@@ -70,7 +70,7 @@ func getVerboisty() int {
 }
 
 func DPrintf(topic logTopic, format string, a ...interface{}) {
-	if DebugVerbosity >= 1 {
+	if debugVerbosity >= 1 {
 		time := time.Since(debugStart).Microseconds()
 		time /= 100
 		prefix := fmt.Sprintf("%06d %v %v ", time, "Raft   ", string(topic))

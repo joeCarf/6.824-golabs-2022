@@ -4,7 +4,6 @@ import (
 	"6.824/labgob"
 	"6.824/labrpc"
 	"bytes"
-	"github.com/sasha-s/go-deadlock"
 	"math/rand"
 	"sort"
 	"sync"
@@ -191,7 +190,7 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isleader
 }
 
-// return 当前term是否有日志
+//// return 当前term是否有日志
 func (rf *Raft) GetIsLogInCurrentTerm() bool {
 	rf.mu.RLock()
 	defer rf.mu.RUnlock()
@@ -253,7 +252,8 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	rf.currentTerm = currentTerm
 	rf.votedFor = votedFor
-	copy(rf.log.Entries, log.Entries) //复制切片采用深拷贝
+	//copy(rf.log.Entries, log.Entries) //复制切片采用深拷贝
+	rf.log = log
 	rf.commitIndex = rf.log.lastIncludeEntry().Index
 	rf.lastApplied = rf.log.lastIncludeEntry().Index
 	DPrintf(dPersist, "T%d: S%d read persist: state=%v,[currentTerm=%v, votedFor=%v, log=%v]",
@@ -656,14 +656,11 @@ func (rf *Raft) leaderElection() {
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.electionTimer.Reset(rf.randomElectionTime())
-
-	currentTerm := rf.currentTerm
-	me := rf.me
 	rf.mu.Unlock()
 	// Send RequestVote RPC to all other servers
 	getVotes := 1                       //得到的选票数, 默认自己有一张选票
 	finishVotes := 1                    //已经完成投票的节点数
-	var leMutex deadlock.Mutex          //用来互斥访问getVotes
+	var leMutex sync.Mutex              //用来互斥访问getVotes
 	var condRV = sync.NewCond(&leMutex) //条件变量来检查
 	//NOTE: 不可以用waitGroup让主线程等待所有rpc请求都完成, 因为可能出现部分节点crash, 只要有半数就行了
 	var finWg sync.WaitGroup
@@ -673,7 +670,7 @@ func (rf *Raft) leaderElection() {
 		}
 		//异步发送请求
 		finWg.Add(1)
-		DPrintf(dVote, "T%d: S%d -> S%d send request for votes.", currentTerm, me, peer)
+		DPrintf(dVote, "T%d: S%d -> S%d send request for votes.", rf.currentTerm, rf.me, peer)
 		go func(peer int) {
 			defer finWg.Done()
 			rf.mu.RLock()
@@ -821,7 +818,8 @@ func (rf *Raft) broadcastHeartbeat() {
 func (rf *Raft) broadcastEntries(peer int) {
 	rf.mu.RLock()
 	// FIXME: 不懂为什么, 后面preLogEntry访问at的时候会出现nextIndex超出lastEntry的问题
-	if rf.state != LEADER || rf.nextIndex[peer] <= rf.log.lastIncludeEntry().Index || rf.nextIndex[peer] > rf.log.lastEntry().Index {
+	//if rf.state != LEADER || rf.nextIndex[peer] <= rf.log.lastIncludeEntry().Index || rf.nextIndex[peer] > rf.log.lastEntry().Index {
+	if rf.state != LEADER || rf.nextIndex[peer] <= rf.log.lastIncludeEntry().Index {
 		rf.mu.RUnlock()
 		return
 	}
@@ -982,9 +980,6 @@ func (rf *Raft) broadcastSnapshot(peer int) {
 //  @receiver rf
 //
 func (rf *Raft) ticker() {
-	rf.mu.RLock()
-	DPrintf(dLog, "electionTimer=%v, heartbeatTimer=%v", rf.electionTimer, rf.heartbeatTimer)
-	rf.mu.RUnlock()
 	//需要保证退出机制, 就是rf节点退出的时候
 	for rf.killed() == false {
 		select {
@@ -992,7 +987,6 @@ func (rf *Raft) ticker() {
 			//选举计时器超时, follower的规则: 选举计时器超时, 并且要没有收到其他的选票, 且自己没有投过票
 			//总结一下就是能选举的条件是: 不是leader, 且在这个term中没投过票
 			rf.mu.RLock()
-			DPrintf(dLog, "here2")
 			canElect := rf.state != LEADER
 			rf.mu.RUnlock()
 			if canElect {
@@ -1005,7 +999,6 @@ func (rf *Raft) ticker() {
 		case <-rf.heartbeatTimer.C:
 			// 发送心跳包计时器超时, 需要发送心跳包, 同样只有leader可以发心跳包
 			rf.mu.RLock()
-			DPrintf(dLog, "here2")
 			canBroadHB := rf.state == LEADER
 			rf.mu.RUnlock()
 			if canBroadHB {
@@ -1177,12 +1170,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
-	if log == false {
-		// 禁用日志
-		DebugVerbosity = 0
-	} else {
-		DebugVerbosity = 1
-	}
+	//if log == false {
+	//	// 禁用日志
+	//	DebugVerbosity = 0
+	//} else {
+	//	DebugVerbosity = 1
+	//}
 	rf.state = FOLLOWER
 	rf.currentTerm = 0
 	rf.votedFor = -1
@@ -1206,15 +1199,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyChan = applyCh
 
 	// initialize from state persisted before a crash
-	rf.mu.Lock()
 	rf.readPersist(persister.ReadRaftState())
-	rf.mu.Unlock()
 
 	//开启后台监视进程
 	go rf.ticker()
 	go rf.applier()
 
-	DPrintf(dLog, "R%d start raft!", rf.me)
+	//DPrintf(dLog, "R%d start raft!", rf.me)
 
 	return rf
 }

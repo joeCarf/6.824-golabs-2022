@@ -10,7 +10,6 @@ package raft
 
 import (
 	"6.824/labgob"
-	"github.com/sasha-s/go-deadlock"
 )
 import "6.824/labrpc"
 import "bytes"
@@ -41,7 +40,7 @@ func makeSeed() int64 {
 }
 
 type config struct {
-	mu          deadlock.Mutex
+	mu          sync.Mutex
 	t           *testing.T
 	finished    int32
 	net         *labrpc.Network
